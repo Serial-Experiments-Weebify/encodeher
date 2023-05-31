@@ -28,7 +28,7 @@ export function getResolutions(inW: number, inH: number) {
                 ({ w, name }) => ({
                     name,
                     w,
-                    h: roundByTwo((w / inW) * inH) & ~1,
+                    h: roundByTwo((w / inW) * inH),
                 })
             )
         );
@@ -38,7 +38,7 @@ export function getResolutions(inW: number, inH: number) {
             ...NAMED_RESOLUTIONS.filter((x) => x.h < inH).map(
                 ({ h, name }) => ({
                     name,
-                    w: roundByTwo((h / inH) * inW) & ~1,
+                    w: roundByTwo((h / inH) * inW),
                     h,
                 })
             )

@@ -83,3 +83,17 @@ export interface ShowStreams {
 }
 
 export type ProbeResult = ShowFormat & ShowStreams;
+
+export interface Chapter {
+    id: number;
+    start_time: string;
+    end_time: string;
+    tags: {
+        title?: string;
+        [index: string]: any;
+    };
+}
+
+export interface ShowChapters {
+    chapters: Chapter[];
+}

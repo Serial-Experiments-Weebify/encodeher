@@ -1,11 +1,10 @@
-import { spawn, exec, ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { access } from "fs/promises";
-import { createWriteStream } from "fs";
 import fs from "fs/promises";
 import * as FF from "./ffmpegTypes";
 import path, { join } from "path";
-import { createHash } from "crypto";
 import { Resolution } from "./resolution";
+import { EncodherLogger } from "./logger";
 
 interface IProbeSpawnResult {
     code: number;
@@ -16,7 +15,8 @@ interface IProbeSpawnResult {
 function getStdioAsString(
     name: string,
     args: string[],
-    collect_error: boolean = true
+    collect_error: boolean = true,
+    logger: EncodherLogger
 ): Promise<IProbeSpawnResult> {
     return new Promise((resolve, reject) => {
         const child = spawn(name, args);
@@ -24,6 +24,7 @@ function getStdioAsString(
             stderr: string[] = [];
 
         child.stdout.on("data", (data) => stdout.push(data.toString()));
+        child.stderr.on("data", (data) => logger.append(data.toString()));
         if (collect_error)
             child.stderr.on("data", (data) => stderr.push(data.toString()));
 
@@ -43,6 +44,8 @@ function ffEscape(text: string) {
 
 function ffmpegGetStreamProcess(file: string, index: number, format: string) {
     return spawn("ffmpeg", [
+        "-loglevel",
+        "24",
         "-i",
         file,
         "-map",
@@ -56,17 +59,21 @@ function ffmpegGetStreamProcess(file: string, index: number, format: string) {
 function ffmpegGetStreamLength(
     file: string,
     index: number,
-    format: string
+    format: string,
+    logger: EncodherLogger
 ): Promise<number> {
     const p = ffmpegGetStreamProcess(file, index, format);
     let l = 0;
     return new Promise((resolve, reject) => {
-        p.stdout.on("data", (chunk) => {
-            l += chunk.length;
-        });
+        logger.writeHeader(`Stream #${index} length as ${format}`);
+        p.stdout.on("data", (chunk) => (l += chunk.length));
+
+        p.stderr.on("on", (chunk) => logger.append(chunk.toString()));
+
         p.on("exit", (code) => {
             if (code == 0) resolve(l);
             else reject("Process exited with code: " + code);
+            logger.writeFooter();
         });
     });
 }
@@ -94,7 +101,8 @@ export interface PackAudio {
 export async function packMPD(
     videoFiles: PackVideo[],
     audioFiles: PackAudio[],
-    outDir: string
+    outDir: string,
+    logger: EncodherLogger
 ) {
     const packagerArgs = [];
 
@@ -117,68 +125,94 @@ export async function packMPD(
 
     packagerArgs.push("--mpd_output", path.join(outDir, "manifest.mpd"));
 
-    console.log(`command: \npackager ${packagerArgs.join("\n")}`);
     const packager = spawn("packager", packagerArgs);
 
-    console.log("Redirecting output...\n\n");
-    packager.stderr.pipe(process.stderr);
+    logger.writeHeader("Packager output");
+
+    packager.stderr.on("data", (chunk) => logger.append(chunk.toString()));
 
     await waitForExit(packager);
+    logger.writeFooter();
     return true;
 }
 
-export class VideoFile {
-    private constructor(protected filePath: string) {}
+export interface Chapter {
+    start: number;
+    title: string;
+    end: number;
+}
 
-    public static async at(filePath: string) {
+function extractTime(str: string): number | undefined {
+    const time = str
+        .match(/time=(-?\d+):(\d+):(\d+)\.(\d+)\s/)
+        ?.slice(1, 5)
+        .reverse()
+        .map((x, i) => parseInt(x) * (i == 0 ? 0.01 : 60 ** (i - 1)))
+        .reduce((p, c) => c + p);
+
+    if (!time) return undefined;
+
+    return Math.max(0, time);
+}
+
+export class VideoFile {
+    private constructor(
+        protected filePath: string,
+        protected logger: EncodherLogger
+    ) {}
+
+    public static async at(filePath: string, logger: EncodherLogger) {
         await access(filePath);
-        return new VideoFile(filePath);
+        return new VideoFile(filePath, logger);
     }
 
     public async getStreamsAndFormat(): Promise<FF.ProbeResult> {
-        const result = await getStdioAsString("ffprobe", [
-            "-v",
-            "quiet",
-            "-print_format",
-            "json",
-            "-show_format",
-            "-show_streams",
-            this.filePath,
-        ]);
+        this.logger.writeHeader("Streams and format");
+        const result = await getStdioAsString(
+            "ffprobe",
+            [
+                "-loglevel",
+                "24",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                this.filePath,
+            ],
+            false,
+            this.logger
+        );
+        this.logger.writeFooter();
         return JSON.parse(result.stdout);
     }
 
-    public async getSubTextSize(index: number) {
-        return ffmpegGetStreamLength(this.filePath, index, "srt");
+    public async getChapters(): Promise<Chapter[]> {
+        this.logger.writeHeader("Chapters");
+        const result = await getStdioAsString(
+            "ffprobe",
+            [
+                "-loglevel",
+                "24",
+                "-print_format",
+                "json",
+                "-show_chapters",
+                this.filePath,
+            ],
+            false,
+            this.logger
+        );
+        this.logger.writeFooter();
+        const raw = JSON.parse(result.stdout) as FF.ShowChapters;
+
+        return raw.chapters.map((x) => ({
+            start: parseFloat(x.start_time),
+            end: parseFloat(x.end_time),
+            title: x.tags?.title ?? "?",
+        }));
     }
 
-    public async getStreamHashes(
-        algo: FF.HashAlgorithm,
-        indexes: number[]
-    ): Promise<Record<number, string>> {
-        const streamMappings = indexes.map((i) => ["-map", `0:${i}`]).flat();
-        console.log(streamMappings);
-        const result = await getStdioAsString("ffmpeg", [
-            "-v",
-            "quiet",
-            "-i",
-            this.filePath,
-            "-f",
-            "streamhash",
-            "-hash",
-            algo,
-            "-",
-        ]);
-        console.log(result.stdout);
-        const hashes = result.stdout
-            .split("\n")
-            .filter((x) => x.length > 0)
-            .map((line) => line.split(",")[2].split("=")[1]);
-        let out: Record<number, string> = {};
-
-        hashes.forEach((hash, i) => (out[indexes[i]] = hash));
-
-        return out;
+    public async getSubTextSize(index: number) {
+        return ffmpegGetStreamLength(this.filePath, index, "srt", this.logger);
     }
 
     public dumpAttachmentWithHash(
@@ -188,23 +222,29 @@ export class VideoFile {
     ): Promise<string> {
         return new Promise((resolve, reject) => {
             const outFileName = join(outPath, filename);
-
+            this.logger.writeHeader(`Dump attachment ${index}`);
             const src = spawn("ffmpeg", [
-                "-v",
-                "quiet",
+                "-loglevel",
+                "24",
                 "-y",
                 `-dump_attachment:${index}`,
                 outFileName,
                 "-i",
                 this.filePath,
             ]);
+
+            src.stderr.on("data", (chunk) =>
+                this.logger.append(chunk.toString())
+            );
+
             src.on("exit", async (code) => {
                 fs.access(outFileName).catch(() => reject("Extraction failed"));
 
                 const hash = await getStdioAsString(
                     "md5sum",
                     ["-b", outFileName],
-                    false
+                    false,
+                    this.logger
                 );
                 if (hash.code != 0) throw "MD5 failed";
                 const md5 = hash.stdout.trim().split(" ")?.[0];
@@ -213,7 +253,8 @@ export class VideoFile {
                 const newName = `${md5}-${filename}`;
                 const newPath = path.join(outPath, newName);
 
-                fs.rename(outFileName, newPath).catch(reject);
+                this.logger.writeFooter();
+                await fs.rename(outFileName, newPath).catch(reject);
                 resolve(newName);
             });
         });
@@ -225,9 +266,10 @@ export class VideoFile {
         outFile: string
     ): Promise<void> {
         return new Promise((resolve, reject) => {
+            this.logger.writeHeader(`Extract stream ${index}`);
             const proc = spawn("ffmpeg", [
-                "-v",
-                "quiet",
+                "-loglevel",
+                "24",
                 "-y",
                 "-i",
                 this.filePath,
@@ -240,7 +282,12 @@ export class VideoFile {
                 outFile,
             ]);
 
+            proc.stderr.on("data", (chunk) =>
+                this.logger.append(chunk.toString())
+            );
+
             proc.on("exit", (code) => {
+                this.logger.writeFooter();
                 if (code == 0) resolve();
                 else reject("Process exited with code: " + code);
             });
@@ -252,7 +299,8 @@ export class VideoFile {
         audioIndex: number,
         subtitleIndex: number | null,
         resolution: Resolution,
-        outPath: string
+        outPath: string,
+        updateProgress: (progress: number) => void = () => {}
     ) {
         const outFile = path.join(outPath, "fallback.mp4");
         //? set yes to overwrite, some stdout settings, input file and faststart
@@ -260,8 +308,7 @@ export class VideoFile {
             "-y",
             "-hide_banner",
             "-loglevel",
-            "32",
-            // "64",
+            "24",
             "-stats",
             "-i",
             this.filePath,
@@ -321,16 +368,28 @@ export class VideoFile {
             ...encoderArgs,
         ];
 
-        console.log(`command: \nffmpeg ${args.join(" ")}`);
+        this.logger.writeHeader("Video V0");
+        this.logger.append(`command: \nffmpeg ${args.join(" ")}\n`);
         const encoderProcess = spawn("ffmpeg", args, {});
 
-        console.log("Redirecting output...\n\n");
-        encoderProcess.stderr.pipe(process.stderr);
+        encoderProcess.stderr.on("data", (chunk) => {
+            const txt = chunk.toString();
+
+            const time = extractTime(txt);
+            if (time) updateProgress(time);
+
+            this.logger.append(txt);
+        });
 
         await waitForExit(encoderProcess);
+        this.logger.writeFooter();
     }
 
-    async encodeAudio(audioStream: FF.BaseProbeStream, outPath: string) {
+    async encodeAudio(
+        audioStream: FF.BaseProbeStream,
+        outPath: string,
+        updateProgress: (progress: number) => void = () => {}
+    ) {
         const baseArgs = [
             "-y", //overwrite
             "-hide_banner",
@@ -355,28 +414,36 @@ export class VideoFile {
             "2",
         ];
 
-        const outFile = path.join(
-            outPath,
-            (audioStream.tags.language ?? "unk") + ".webm"
-        );
+        const audioName = audioStream.tags.language ?? "unk";
+        const outFile = path.join(outPath, audioName + ".webm");
 
         const args = [...baseArgs, ...audioArgs, outFile];
 
-        console.log(`command: \nffmpeg ${args.join(" ")}`);
+        this.logger.writeHeader(`Audio ${audioName}`);
+        this.logger.append(`command: \nffmpeg ${args.join(" ")}\n`);
 
         const encoderProcess = spawn("ffmpeg", args, {});
 
-        console.log("Redirecting output...\n\n");
-        encoderProcess.stderr.pipe(process.stderr);
+        encoderProcess.stderr.on("data", (chunk) => {
+            const txt = chunk.toString();
+
+            const time = extractTime(txt);
+            if (time) updateProgress(time);
+
+            this.logger.append(txt);
+        });
 
         await waitForExit(encoderProcess);
+        this.logger.writeFooter();
+
         return outFile;
     }
 
     async encodeVideo(
         videoStream: FF.BaseProbeStream,
         resolution: Resolution,
-        outPath: string
+        outPath: string,
+        updateProgress: (progress: number) => void = () => {}
     ) {
         const baseArgs = [
             "-y", //overwrite
@@ -418,13 +485,21 @@ export class VideoFile {
         const outFile = path.join(outPath, resolution.name + ".webm");
         const args = [...baseArgs, ...filterArgs, ...videoArgs, outFile];
 
-        console.log(`command: \nffmpeg ${args.join(" ")}`);
+        this.logger.writeHeader(`Video ${resolution.name}`);
+        this.logger.append(`command: \nffmpeg ${args.join(" ")}\n`);
         const encoderProcess = spawn("ffmpeg", args, {});
 
-        console.log("Redirecting output...\n\n");
-        encoderProcess.stderr.pipe(process.stderr);
+        encoderProcess.stderr.on("data", (chunk) => {
+            const txt = chunk.toString();
+
+            const time = extractTime(txt);
+            if (time) updateProgress(time);
+
+            this.logger.append(txt);
+        });
 
         await waitForExit(encoderProcess);
+        this.logger.writeFooter();
         return outFile;
     }
 }
