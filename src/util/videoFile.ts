@@ -1,10 +1,10 @@
-import { spawn, ChildProcessWithoutNullStreams } from "child_process";
-import { access } from "fs/promises";
-import fs from "fs/promises";
-import * as FF from "./ffmpegTypes";
-import path, { join } from "path";
-import { Resolution } from "./resolution";
-import { EncodherLogger } from "./logger";
+import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { access } from 'fs/promises';
+import fs from 'fs/promises';
+import * as FF from './ffmpegTypes';
+import path, { join } from 'path';
+import { Resolution } from '../util/resolution';
+import { EncodherLogger } from './logger';
 
 interface IProbeSpawnResult {
     code: number;
@@ -15,25 +15,25 @@ interface IProbeSpawnResult {
 function getStdioAsString(
     name: string,
     args: string[],
-    collect_error: boolean = true,
-    logger: EncodherLogger
+    collect_error = true,
+    logger: EncodherLogger,
 ): Promise<IProbeSpawnResult> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         const child = spawn(name, args);
         const stdout: string[] = [],
             stderr: string[] = [];
 
-        child.stdout.on("data", (data) => stdout.push(data.toString()));
-        child.stderr.on("data", (data) => logger.append(data.toString()));
+        child.stdout.on('data', (data) => stdout.push(data.toString()));
+        child.stderr.on('data', (data) => logger.append(data.toString()));
         if (collect_error)
-            child.stderr.on("data", (data) => stderr.push(data.toString()));
+            child.stderr.on('data', (data) => stderr.push(data.toString()));
 
-        child.on("exit", (code) =>
+        child.on('exit', (code) =>
             resolve({
                 code: code ?? 0,
-                stdout: stdout.join(""),
-                stderr: stderr.join(""),
-            })
+                stdout: stdout.join(''),
+                stderr: stderr.join(''),
+            }),
         );
     });
 }
@@ -43,16 +43,16 @@ function ffEscape(text: string) {
 }
 
 function ffmpegGetStreamProcess(file: string, index: number, format: string) {
-    return spawn("ffmpeg", [
-        "-loglevel",
-        "24",
-        "-i",
+    return spawn('ffmpeg', [
+        '-loglevel',
+        '24',
+        '-i',
         file,
-        "-map",
+        '-map',
         `0:${index}`,
-        "-f",
+        '-f',
         format,
-        "-",
+        '-',
     ]);
 }
 
@@ -60,19 +60,19 @@ function ffmpegGetStreamLength(
     file: string,
     index: number,
     format: string,
-    logger: EncodherLogger
+    logger: EncodherLogger,
 ): Promise<number> {
     const p = ffmpegGetStreamProcess(file, index, format);
     let l = 0;
     return new Promise((resolve, reject) => {
         logger.writeHeader(`Stream #${index} length as ${format}`);
-        p.stdout.on("data", (chunk) => (l += chunk.length));
+        p.stdout.on('data', (chunk) => (l += chunk.length));
 
-        p.stderr.on("on", (chunk) => logger.append(chunk.toString()));
+        p.stderr.on('on', (chunk) => logger.append(chunk.toString()));
 
-        p.on("exit", (code) => {
+        p.on('exit', (code) => {
             if (code == 0) resolve(l);
-            else reject("Process exited with code: " + code);
+            else reject('Process exited with code: ' + code);
             logger.writeFooter();
         });
     });
@@ -80,9 +80,9 @@ function ffmpegGetStreamLength(
 
 function waitForExit(process: ChildProcessWithoutNullStreams): Promise<void> {
     return new Promise((resolve, reject) => {
-        process.on("exit", (code) => {
+        process.on('exit', (code) => {
             if (code == 0) resolve();
-            else reject("Process exited with code: " + code);
+            else reject('Process exited with code: ' + code);
         });
     });
 }
@@ -102,34 +102,34 @@ export async function packMPD(
     videoFiles: PackVideo[],
     audioFiles: PackAudio[],
     outDir: string,
-    logger: EncodherLogger
+    logger: EncodherLogger,
 ) {
     const packagerArgs = [];
 
     videoFiles.forEach((x) => {
-        const vfName = x.res.name + ".webm";
+        const vfName = 'v' + x.res.name + '.webm';
         const outPath = path.join(outDir, vfName);
         packagerArgs.push(`in=${x.path},stream=video,output=${outPath}`);
     });
 
     audioFiles.forEach((x) => {
-        const afName = x.lang + ".webm";
+        const afName = 'a' + x.lang + '.webm';
         const outPath = path.join(outDir, afName);
 
         packagerArgs.push(
             `in=${x.path},stream=audio,lang=${x.lang}${
-                x.default ? ",roles=main" : ""
-            },output=${outPath}`
+                x.default ? ',roles=main' : ''
+            },output=${outPath}`,
         );
     });
 
-    packagerArgs.push("--mpd_output", path.join(outDir, "manifest.mpd"));
+    packagerArgs.push('--mpd_output', path.join(outDir, 'manifest.mpd'));
 
-    const packager = spawn("packager", packagerArgs);
+    const packager = spawn('packager', packagerArgs);
 
-    logger.writeHeader("Packager output");
+    logger.writeHeader('Packager output');
 
-    packager.stderr.on("data", (chunk) => logger.append(chunk.toString()));
+    packager.stderr.on('data', (chunk) => logger.append(chunk.toString()));
 
     await waitForExit(packager);
     logger.writeFooter();
@@ -158,7 +158,7 @@ function extractTime(str: string): number | undefined {
 export class VideoFile {
     private constructor(
         protected filePath: string,
-        protected logger: EncodherLogger
+        protected logger: EncodherLogger,
     ) {}
 
     public static async at(filePath: string, logger: EncodherLogger) {
@@ -167,39 +167,39 @@ export class VideoFile {
     }
 
     public async getStreamsAndFormat(): Promise<FF.ProbeResult> {
-        this.logger.writeHeader("Streams and format");
+        this.logger.writeHeader('Streams and format');
         const result = await getStdioAsString(
-            "ffprobe",
+            'ffprobe',
             [
-                "-loglevel",
-                "24",
-                "-print_format",
-                "json",
-                "-show_format",
-                "-show_streams",
+                '-loglevel',
+                '24',
+                '-print_format',
+                'json',
+                '-show_format',
+                '-show_streams',
                 this.filePath,
             ],
             false,
-            this.logger
+            this.logger,
         );
         this.logger.writeFooter();
         return JSON.parse(result.stdout);
     }
 
     public async getChapters(): Promise<Chapter[]> {
-        this.logger.writeHeader("Chapters");
+        this.logger.writeHeader('Chapters');
         const result = await getStdioAsString(
-            "ffprobe",
+            'ffprobe',
             [
-                "-loglevel",
-                "24",
-                "-print_format",
-                "json",
-                "-show_chapters",
+                '-loglevel',
+                '24',
+                '-print_format',
+                'json',
+                '-show_chapters',
                 this.filePath,
             ],
             false,
-            this.logger
+            this.logger,
         );
         this.logger.writeFooter();
         const raw = JSON.parse(result.stdout) as FF.ShowChapters;
@@ -207,48 +207,49 @@ export class VideoFile {
         return raw.chapters.map((x) => ({
             start: parseFloat(x.start_time),
             end: parseFloat(x.end_time),
-            title: x.tags?.title ?? "?",
+            title: x.tags?.title ?? '?',
         }));
     }
 
     public async getSubTextSize(index: number) {
-        return ffmpegGetStreamLength(this.filePath, index, "srt", this.logger);
+        return ffmpegGetStreamLength(this.filePath, index, 'srt', this.logger);
     }
 
     public dumpAttachmentWithHash(
         index: number,
         outPath: string,
-        filename: string
+        filename: string,
     ): Promise<string> {
         return new Promise((resolve, reject) => {
             const outFileName = join(outPath, filename);
             this.logger.writeHeader(`Dump attachment ${index}`);
-            const src = spawn("ffmpeg", [
-                "-loglevel",
-                "24",
-                "-y",
+            const src = spawn('ffmpeg', [
+                '-loglevel',
+                '24',
+                '-y',
                 `-dump_attachment:${index}`,
                 outFileName,
-                "-i",
+                '-i',
                 this.filePath,
             ]);
 
-            src.stderr.on("data", (chunk) =>
-                this.logger.append(chunk.toString())
+            src.stderr.on('data', (chunk) =>
+                this.logger.append(chunk.toString()),
             );
 
-            src.on("exit", async (code) => {
-                fs.access(outFileName).catch(() => reject("Extraction failed"));
+            src.on('exit', async (code) => {
+                if (code != 0) reject('Extraction failed');
+                fs.access(outFileName).catch(() => reject('Extraction failed'));
 
                 const hash = await getStdioAsString(
-                    "md5sum",
-                    ["-b", outFileName],
+                    'md5sum',
+                    ['-b', outFileName],
                     false,
-                    this.logger
+                    this.logger,
                 );
-                if (hash.code != 0) throw "MD5 failed";
-                const md5 = hash.stdout.trim().split(" ")?.[0];
-                if (!md5) throw "MD5 failed";
+                if (hash.code != 0) throw 'MD5 failed';
+                const md5 = hash.stdout.trim().split(' ')?.[0];
+                if (!md5) throw 'MD5 failed';
 
                 const newName = `${md5}-${filename}`;
                 const newPath = path.join(outPath, newName);
@@ -263,33 +264,33 @@ export class VideoFile {
     public extractStream(
         index: number,
         format: string,
-        outFile: string
+        outFile: string,
     ): Promise<void> {
         return new Promise((resolve, reject) => {
             this.logger.writeHeader(`Extract stream ${index}`);
-            const proc = spawn("ffmpeg", [
-                "-loglevel",
-                "24",
-                "-y",
-                "-i",
+            const proc = spawn('ffmpeg', [
+                '-loglevel',
+                '24',
+                '-y',
+                '-i',
                 this.filePath,
-                "-map",
+                '-map',
                 `0:${index}`,
-                "-c",
-                "copy",
-                "-f",
+                '-c',
+                'copy',
+                '-f',
                 format,
                 outFile,
             ]);
 
-            proc.stderr.on("data", (chunk) =>
-                this.logger.append(chunk.toString())
+            proc.stderr.on('data', (chunk) =>
+                this.logger.append(chunk.toString()),
             );
 
-            proc.on("exit", (code) => {
+            proc.on('exit', (code) => {
                 this.logger.writeFooter();
                 if (code == 0) resolve();
-                else reject("Process exited with code: " + code);
+                else reject('Process exited with code: ' + code);
             });
         });
     }
@@ -300,63 +301,63 @@ export class VideoFile {
         subtitleIndex: number | null,
         resolution: Resolution,
         outPath: string,
-        updateProgress: (progress: number) => void = () => {}
+        updateProgress: (progress: number) => void = () => void 0,
     ) {
-        const outFile = path.join(outPath, "fallback.mp4");
+        const outFile = path.join(outPath, 'fallback.mp4');
         //? set yes to overwrite, some stdout settings, input file and faststart
         const baseArgs = [
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "24",
-            "-stats",
-            "-i",
+            '-y',
+            '-hide_banner',
+            '-loglevel',
+            '24',
+            '-stats',
+            '-i',
             this.filePath,
-            "-movflags",
-            "+faststart",
-            "-brand",
-            "mp42",
+            '-movflags',
+            '+faststart',
+            '-brand',
+            'mp42',
         ];
         //? point to video stream and select video codec
-        const videoArgs = ["-map", `0:${videoIndex}`, "-c:v", "libx264"];
+        const videoArgs = ['-map', `0:${videoIndex}`, '-c:v', 'libx264'];
         //? point to audio stream, select audio codec, downmix to 2 channels
         const audioArgs = [
-            "-map",
+            '-map',
             `0:${audioIndex}`,
-            "-c:a",
-            "aac",
-            "-ac",
-            "2",
+            '-c:a',
+            'aac',
+            '-ac',
+            '2',
         ];
 
         const filters = [
-            "format=yuv420p",
+            'format=yuv420p',
             `scale=${resolution.w}:${resolution.h}`,
         ];
 
         if (subtitleIndex != null)
             filters.push(
                 `subtitles=${ffEscape(
-                    ffEscape(this.filePath)
-                )}:si=${subtitleIndex}`
+                    ffEscape(this.filePath),
+                )}:si=${subtitleIndex}`,
             );
 
-        const filterArgs = ["-vf", filters.join(",")];
+        const filterArgs = ['-vf', filters.join(',')];
 
         //? set the output file format, some libx264 settings and output file name
         const encoderArgs = [
-            "-f",
-            "mp4",
-            "-crf",
-            "23",
-            "-preset",
-            "slow",
-            "-tune",
-            "animation",
-            "-bf",
-            "2",
-            "-g",
-            "90",
+            '-f',
+            'mp4',
+            '-crf',
+            '23',
+            '-preset',
+            'slow',
+            '-tune',
+            'animation',
+            '-bf',
+            '2',
+            '-g',
+            '90',
             outFile,
         ];
 
@@ -368,11 +369,11 @@ export class VideoFile {
             ...encoderArgs,
         ];
 
-        this.logger.writeHeader("Video V0");
-        this.logger.append(`command: \nffmpeg ${args.join(" ")}\n`);
-        const encoderProcess = spawn("ffmpeg", args, {});
+        this.logger.writeHeader('Video V0');
+        this.logger.append(`command: \nffmpeg ${args.join(' ')}\n`);
+        const encoderProcess = spawn('ffmpeg', args, {});
 
-        encoderProcess.stderr.on("data", (chunk) => {
+        encoderProcess.stderr.on('data', (chunk) => {
             const txt = chunk.toString();
 
             const time = extractTime(txt);
@@ -388,43 +389,43 @@ export class VideoFile {
     async encodeAudio(
         audioStream: FF.BaseProbeStream,
         outPath: string,
-        updateProgress: (progress: number) => void = () => {}
+        updateProgress: (progress: number) => void = () => void 0,
     ) {
         const baseArgs = [
-            "-y", //overwrite
-            "-hide_banner",
-            "-loglevel",
-            "24", // warn/error
-            "-stats",
-            "-i",
+            '-y', //overwrite
+            '-hide_banner',
+            '-loglevel',
+            '24', // warn/error
+            '-stats',
+            '-i',
             this.filePath,
-            "-vn", //no video
+            '-vn', //no video
         ];
 
         const audioArgs = [
-            "-map",
+            '-map',
             `0:${audioStream.index}`,
-            "-c:a",
-            "libopus",
-            "-b:a",
-            "96k",
-            "-ar",
-            "48000",
-            "-ac",
-            "2",
+            '-c:a',
+            'libopus',
+            '-b:a',
+            '96k',
+            '-ar',
+            '48000',
+            '-ac',
+            '2',
         ];
 
-        const audioName = audioStream.tags.language ?? "unk";
-        const outFile = path.join(outPath, audioName + ".webm");
+        const audioName = audioStream.tags.language ?? 'unk';
+        const outFile = path.join(outPath, 'a' + audioName + '.webm');
 
         const args = [...baseArgs, ...audioArgs, outFile];
 
         this.logger.writeHeader(`Audio ${audioName}`);
-        this.logger.append(`command: \nffmpeg ${args.join(" ")}\n`);
+        this.logger.append(`command: \nffmpeg ${args.join(' ')}\n`);
 
-        const encoderProcess = spawn("ffmpeg", args, {});
+        const encoderProcess = spawn('ffmpeg', args, {});
 
-        encoderProcess.stderr.on("data", (chunk) => {
+        encoderProcess.stderr.on('data', (chunk) => {
             const txt = chunk.toString();
 
             const time = extractTime(txt);
@@ -443,53 +444,53 @@ export class VideoFile {
         videoStream: FF.BaseProbeStream,
         resolution: Resolution,
         outPath: string,
-        updateProgress: (progress: number) => void = () => {}
+        updateProgress: (progress: number) => void = () => void 0,
     ) {
         const baseArgs = [
-            "-y", //overwrite
-            "-hide_banner",
-            "-loglevel",
-            "24", // warn/error
-            "-stats",
-            "-i",
+            '-y', //overwrite
+            '-hide_banner',
+            '-loglevel',
+            '24', // warn/error
+            '-stats',
+            '-i',
             this.filePath,
-            "-an", //no audio
+            '-an', //no audio
         ];
 
         const filters: string[] = [];
 
-        if (resolution.name != "native") {
+        if (resolution.name != 'native') {
             filters.push(`scale=${resolution.w}:${resolution.h}`);
         }
 
         const filterArgs: string[] = [];
 
-        if (filters.length > 0) filterArgs.push("-vf", filters.join(","));
+        if (filters.length > 0) filterArgs.push('-vf', filters.join(','));
 
         const videoArgs = [
-            "-map",
+            '-map',
             `0:${videoStream.index}`,
-            "-c:v",
-            "libsvtav1", // AV1 we ball
-            "-g", // GOP
-            "90",
-            "-preset",
-            "7", // Presets 4-6 are commonly used by home enthusiasts
-            "-crf",
-            "33", //Experience has shown that relatively high crf values with low levels of film-grain
-            "-svtav1-params",
-            "tune=0:film-grain=2", //with low levels of film-grain
+            '-c:v',
+            'libsvtav1', // AV1 we ball
+            '-g', // GOP
+            '90',
+            '-preset',
+            '7', // Presets 4-6 are commonly used by home enthusiasts
+            '-crf',
+            '33', //Experience has shown that relatively high crf values with low levels of film-grain
+            '-svtav1-params',
+            'tune=0:film-grain=2', //with low levels of film-grain
             //produce 2D animation results that are visually good
         ];
 
-        const outFile = path.join(outPath, resolution.name + ".webm");
+        const outFile = path.join(outPath, 'v' + resolution.name + '.webm');
         const args = [...baseArgs, ...filterArgs, ...videoArgs, outFile];
 
         this.logger.writeHeader(`Video ${resolution.name}`);
-        this.logger.append(`command: \nffmpeg ${args.join(" ")}\n`);
-        const encoderProcess = spawn("ffmpeg", args, {});
+        this.logger.append(`command: \nffmpeg ${args.join(' ')}\n`);
+        const encoderProcess = spawn('ffmpeg', args, {});
 
-        encoderProcess.stderr.on("data", (chunk) => {
+        encoderProcess.stderr.on('data', (chunk) => {
             const txt = chunk.toString();
 
             const time = extractTime(txt);

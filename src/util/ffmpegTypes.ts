@@ -1,21 +1,21 @@
 export type HashAlgorithm =
-    | "MD5"
-    | "murmur3"
-    | "RIPEMD128"
-    | "RIPEMD160"
-    | "RIPEMD256"
-    | "RIPEMD320"
-    | "SHA160"
-    | "SHA224"
-    | "SHA256"
-    | "SHA512/224"
-    | "SHA512/256"
-    | "SHA384"
-    | "SHA512"
-    | "CRC32"
-    | "adler32.";
+    | 'MD5'
+    | 'murmur3'
+    | 'RIPEMD128'
+    | 'RIPEMD160'
+    | 'RIPEMD256'
+    | 'RIPEMD320'
+    | 'SHA160'
+    | 'SHA224'
+    | 'SHA256'
+    | 'SHA512/224'
+    | 'SHA512/256'
+    | 'SHA384'
+    | 'SHA512'
+    | 'CRC32'
+    | 'adler32.';
 
-export type StreamType = "video" | "audio" | "subtitle" | "attachment";
+export type StreamType = 'video' | 'audio' | 'subtitle' | 'attachment';
 
 export interface StreamDisposition {
     default: 0 | 1;
@@ -73,7 +73,7 @@ export interface BaseProbeStream {
 }
 
 export interface VideoProbeStream extends BaseProbeStream {
-    stream_type: "video";
+    stream_type: 'video';
     width: number;
     height: number;
 }
