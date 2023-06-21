@@ -223,7 +223,8 @@ export class VideoFile {
         return new Promise((resolve, reject) => {
             const outFileName = join(outPath, filename);
             this.logger.writeHeader(`Dump attachment ${index}`);
-            const src = spawn('ffmpeg', [
+
+            const args = [
                 '-loglevel',
                 '24',
                 '-y',
@@ -231,14 +232,19 @@ export class VideoFile {
                 outFileName,
                 '-i',
                 this.filePath,
-            ]);
+            ];
+
+            const src = spawn('ffmpeg', args);
 
             src.stderr.on('data', (chunk) =>
                 this.logger.append(chunk.toString()),
             );
 
-            src.on('exit', async (code) => {
-                if (code != 0) reject('Extraction failed');
+            src.on('exit', async (/*fuck you ffmpeg devs*/) => {
+                // I used to check the return code here, but ffmpeg devs decided
+                // that I don't deserve a stable API and randomly started
+                // returning 1 on success I hope they recieve a pipe bomb in the
+                // mail
                 fs.access(outFileName).catch(() => reject('Extraction failed'));
 
                 const hash = await getStdioAsString(

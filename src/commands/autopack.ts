@@ -155,7 +155,7 @@ export async function pack(
         );
         fontBar.update(++i, { status: font.tags.filename });
 
-        fontMap[font.tags.filename] = `fonts/${outName}`;
+        fontMap[font.tags.filename] = outName;
     }
 
     logger.writeFooter();
